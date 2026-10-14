@@ -38,12 +38,15 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.ToIntFunction;
 
 public class CactusBuilderClient implements ClientModInitializer {
     static final int MAX_LAYERS = 8;
     static final double REACH = 4.3;
     static final double STAND_REACH = 4.0;
     static final int MAX_ATTEMPTS = 6;
+    /** o ile wpisow planu pole, na ktorym stoimy, ma byc "pozniej" niz stawiany klocek. */
+    static final int SAFE_MARGIN = 60;
     static final int MAX_WALK_TICKS = 400;
     static final int BFS_NODES = 2500;
     static final float MIN_HEALTH = 6.0f;
@@ -59,6 +62,8 @@ public class CactusBuilderClient implements ClientModInitializer {
 
     static KeyBinding toggleKey;
     static KeyBinding resetKey;
+    static KeyBinding hudKey;
+    static boolean hudOn = true;
     static State state = State.IDLE;
     static String status = "Pauza";
     static ChunkPlan plan;
@@ -89,6 +94,8 @@ public class CactusBuilderClient implements ClientModInitializer {
     static boolean stalled;
     /** true gdy pole celu jest pod graczem i nie ma gdzie sie cofnac (ostatnia kratka w rogu) -> od razu podbudowa. */
     static boolean trapped;
+    /** cel, dla ktorego nie ma lepszego miejsca do stania niz obecne (nie planuj ruchu ponownie). */
+    static BlockPos noBetter;
     /** true tylko przy wznowieniu po podbudowie: plan zachowuje orientacje (to samo naroze konca pietra). */
     static boolean keepOrientation;
 
@@ -99,6 +106,8 @@ public class CactusBuilderClient implements ClientModInitializer {
                 new KeyBinding("key.cactusbuilder.toggle", InputUtil.Type.KEYSYM, 71, category)); // G
         resetKey = KeyBindingHelper.registerKeyBinding(
                 new KeyBinding("key.cactusbuilder.reset", InputUtil.Type.KEYSYM, 72, category)); // H
+        hudKey = KeyBindingHelper.registerKeyBinding(
+                new KeyBinding("key.cactusbuilder.hud", InputUtil.Type.KEYSYM, 74, category)); // J
         ClientTickEvents.START_CLIENT_TICK.register(mc -> {
             if (Climber.tick(mc)) return;
             AimHelper.tick(mc);
@@ -120,6 +129,10 @@ public class CactusBuilderClient implements ClientModInitializer {
         ClientPlayerEntity p = mc.player;
         ClientWorld w = mc.world;
 
+        while (hudKey.wasPressed()) {
+            hudOn = !hudOn;
+            p.sendMessage(Text.literal("[CactusBuilder] HUD " + (hudOn ? "wlaczony" : "wylaczony")), true);
+        }
         while (resetKey.wasPressed()) {
             if (Climber.active()) Climber.cancel(mc, "Sesja wyczyszczona");
             sessionChunk = null;
@@ -161,10 +174,17 @@ public class CactusBuilderClient implements ClientModInitializer {
         }
         if (target == null) {
             int feet = p.getBlockPos().getY() - plan.baseY;
-            target = plan.next(w, skipped, feet);
+            // Pole, na ktorym stoimy, zostawiamy na koniec: nie da sie go postawic spod siebie.
+            BlockPos fp = p.getBlockPos();
+            Set<BlockPos> avoid = new HashSet<>(skipped);
+            avoid.add(fp);
+            avoid.add(fp.up());
+            target = plan.next(w, avoid, feet);
             walkTicks = 0;
             pathFor = null;
             if (target == null) {
+                // Jesli zostalo tylko pole pod nami - to jest ostatnia kratka: podbudowa w tym rogu.
+                if (plan.next(w, skipped, feet) != null) trapped = true;
                 if (!skipped.isEmpty() && rounds < 2 && !trapped) {
                     rounds++;
                     skipped.clear();
@@ -186,7 +206,14 @@ public class CactusBuilderClient implements ClientModInitializer {
         boolean inReach = !intersects && dist <= REACH;
         boolean safeHere = !unsafe(w, p.getBlockPos());
 
-        if (!inReach || !safeHere) {
+        // Stoimy "z przodu" (za blisko jeszcze niezabudowanych sasiadow)? Przesun sie do tylu, zanim sie zamurujesz.
+        boolean wantMove = false;
+        if (inReach && safeHere && !pos.equals(noBetter)) {
+            int tIdx = plan.indexOfPos(pos);
+            int cur = plan.indexAt(p.getBlockPos());
+            wantMove = tIdx >= 0 && cur >= 0 && cur - tIdx < SAFE_MARGIN;
+        }
+        if (!inReach || !safeHere || wantMove) {
             int limit = pathFailed ? 40 : 10;
             if (!pos.equals(pathFor) || ++pathAge > limit) {
                 planPath(mc, target);
@@ -404,6 +431,14 @@ public class CactusBuilderClient implements ClientModInitializer {
      * (margines 0) - dzieki temu bot nigdy nie obchodzi chunka od zewnatrz.
      */
     static List<BlockPos> findPath(ClientWorld w, BlockPos start, Predicate<BlockPos> goal, boolean strict) {
+        return findPath(w, start, goal, strict, null);
+    }
+
+    /** score != null: przeszukuje wszystkie osiagalne pola i zwraca sciezke do pola z NAJWIEKSZYM score. */
+    static List<BlockPos> findPath(ClientWorld w, BlockPos start, Predicate<BlockPos> goal, boolean strict,
+                                   ToIntFunction<BlockPos> score) {
+        BlockPos best = null;
+        int bestScore = Integer.MIN_VALUE;
         HashMap<BlockPos, BlockPos> prev = new HashMap<>();
         ArrayDeque<BlockPos> queue = new ArrayDeque<>();
         prev.put(start, null);
@@ -412,14 +447,12 @@ public class CactusBuilderClient implements ClientModInitializer {
             BlockPos f = queue.poll();
             boolean standable = !f.equals(start) || validStand(w, f, strict);
             if (standable && goal.test(f)) {
-                ArrayList<BlockPos> res = new ArrayList<>();
-                BlockPos c = f;
-                while (c != null) {
-                    res.add(c);
-                    c = prev.get(c);
+                if (score == null) return buildPath(prev, f);
+                int sc = score.applyAsInt(f);
+                if (best == null || sc > bestScore) {
+                    best = f;
+                    bestScore = sc;
                 }
-                Collections.reverse(res);
-                return res;
             }
             for (int[] d : DIRS) {
                 boolean diag = d[0] != 0 && d[1] != 0;
@@ -449,7 +482,18 @@ public class CactusBuilderClient implements ClientModInitializer {
                 }
             }
         }
-        return null;
+        return best == null ? null : buildPath(prev, best);
+    }
+
+    private static List<BlockPos> buildPath(HashMap<BlockPos, BlockPos> prev, BlockPos end) {
+        ArrayList<BlockPos> res = new ArrayList<>();
+        BlockPos c = end;
+        while (c != null) {
+            res.add(c);
+            c = prev.get(c);
+        }
+        Collections.reverse(res);
+        return res;
     }
 
     private static boolean standOk(BlockPos g, BlockPos targetPos, Vec3d center) {
@@ -464,8 +508,12 @@ public class CactusBuilderClient implements ClientModInitializer {
         BlockPos pos = t.pos();
         Vec3d center = Vec3d.ofCenter(pos);
         Predicate<BlockPos> goal = g -> standOk(g, pos, center);
-        List<BlockPos> r = findPath(w, start, goal, true);
-        if (r == null) r = findPath(w, start, goal, false);
+        // Stajemy mozliwie "z tylu" (pole z dalszej czesci planu = po niezabudowanej stronie),
+        // zeby bot nie zamurowal sie wlasnymi doniczkami i zawsze mial droge odwrotu.
+        ToIntFunction<BlockPos> score = g -> plan.indexAt(g);
+        List<BlockPos> r = findPath(w, start, goal, true, score);
+        if (r == null) r = findPath(w, start, goal, false, score);
+        noBetter = (r != null && r.size() == 1) ? pos : null;
         path.clear();
         pathIdx = 0;
         pathAge = 0;
@@ -600,7 +648,7 @@ public class CactusBuilderClient implements ClientModInitializer {
 
     private static void drawHud(DrawContext ctx) {
         MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.options.hudHidden) return;
+        if (!hudOn || mc.player == null || mc.options.hudHidden) return;
         ClientPlayerEntity p = mc.player;
         int sand = count(p, Items.SAND);
         int pots = count(p, Items.FLOWER_POT);
@@ -625,6 +673,9 @@ public class CactusBuilderClient implements ClientModInitializer {
                             + ", kaktusy " + remaining[0], x, y, 0xFFAAAAAA);
             ctx.drawTextWithShadow(mc.textRenderer,
                     "Chunk " + plan.chunk.x + "," + plan.chunk.z + "  pominiete: " + skipped.size(), x, y += step, 0xFFAAAAAA);
+            ctx.drawTextWithShadow(mc.textRenderer,
+                    "Cel: " + (target == null ? "-" : target.kind() + " " + target.pos().toShortString())
+                            + "  [J = HUD]", x, y += step, 0xFFAAAAAA);
         }
     }
 }

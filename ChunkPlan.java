@@ -11,6 +11,7 @@ import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.World;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
 
@@ -51,6 +52,8 @@ final class ChunkPlan {
     final boolean flipZ;
     final boolean lowFirst;
     private final List<Entry> entries = new ArrayList<>();
+    /** pozycja -> numer wpisu w kolejnosci budowy (kto jest pozniej, ten jest po niezabudowanej stronie). */
+    private final HashMap<BlockPos, Integer> index = new HashMap<>();
 
     ChunkPlan(ChunkPos chunk, int baseY, int maxLayers) {
         this(chunk, baseY, maxLayers, null, null);
@@ -119,7 +122,9 @@ final class ChunkPlan {
     }
 
     private void add(Kind kind, int x, int y, int z) {
-        entries.add(new Entry(new Target(new BlockPos(x, y, z), kind), needFor(y)));
+        BlockPos bp = new BlockPos(x, y, z);
+        entries.add(new Entry(new Target(bp, kind), needFor(y)));
+        index.put(bp, entries.size() - 1);
     }
 
     private void cell(int layer, int h, int x, int z) {
@@ -198,6 +203,19 @@ final class ChunkPlan {
             return e.t();
         }
         return null;
+    }
+
+    /** Numer wpisu planu dla pozycji (-1 = brak). */
+    int indexOfPos(BlockPos p) {
+        Integer i = index.get(p);
+        return i == null ? -1 : i;
+    }
+
+    /** Numer w kolejnosci budowy dla pola, na ktorym stoi gracz (stopy w g): wpis na g albo na g.up(). */
+    int indexAt(BlockPos g) {
+        Integer i = index.get(g);
+        if (i == null) i = index.get(g.up());
+        return i == null ? -1 : i;
     }
 
     /** Rodzaj klocka przewidziany przez plan na tej pozycji (null = nic / poza planem). */

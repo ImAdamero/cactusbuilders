@@ -38,6 +38,7 @@ final class Climber {
     private static int stepX = Integer.MIN_VALUE;
     private static int stepZ;
     private static int startN;
+    private static int sameTries;
     private static int lastClimbFeet = Integer.MIN_VALUE;
     private static final ArrayList<BlockPos> pillar = new ArrayList<>();
 
@@ -50,6 +51,7 @@ final class Climber {
 
     static void resetSession() {
         lastClimbFeet = Integer.MIN_VALUE;
+        sameTries = 0;
     }
 
     static void hardReset() {
@@ -147,9 +149,20 @@ final class Climber {
                 }
                 if (!p.isOnGround()) return false;
                 int n2 = p.getBlockPos().getY() - plan.baseY;
-                if (n2 >= 2 * plan.maxLayers || n2 == lastClimbFeet) {
+                if (n2 >= 2 * plan.maxLayers) {
                     CactusBuilderClient.stalled = false;
+                    CactusBuilderClient.status = "Wszystkie pietra gotowe";
                     return false;
+                }
+                if (n2 == lastClimbFeet) {
+                    // Probowalismy juz z tej wysokosci - nie wchodz w petle, ale daj znac, a nie milcz.
+                    if (++sameTries > 3) {
+                        CactusBuilderClient.stalled = false;
+                        CactusBuilderClient.status = "Podbudowa nie wyszla z tej wysokosci - ustaw sie w rogu, H i G";
+                        return false;
+                    }
+                } else {
+                    sameTries = 0;
                 }
                 need = n2 <= 0 ? 3 : 2;
                 final int nn = need;
