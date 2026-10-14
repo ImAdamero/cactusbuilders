@@ -143,6 +143,7 @@ final class ChunkPlan {
     private void build() {
         for (int layer = 0; layer < maxLayers; layer++) {
             int h = 2 * layer + 1;
+            int first = entries.size();
             // 16 rzedow "weza", jeden po drugim; ostatni rzad konczy sie w rogu (tam bot sie podsadza)
             for (int row = 0; row < 16; row++) {
                 for (int c = 0; c < 16; c++) {
@@ -150,6 +151,15 @@ final class ChunkPlan {
                     int x = minX + (forward ? c : 15 - c);
                     int z = minZ + (flipZ ? 15 - row : row);
                     cell(layer, h, x, z);
+                }
+            }
+            // Ostatni kaktus pietra (w rogu, gdzie bot stanie na koncu) jest ZAREZERWOWANY:
+            // nie stawiamy go, dopoki bot sie nie podbuduje wyzej - tam jest miejsce na slupek.
+            for (int i = entries.size() - 1; i >= first; i--) {
+                Entry e = entries.get(i);
+                if (e.t().kind() == Kind.CACTUS) {
+                    entries.set(i, new Entry(e.t(), 2 * layer + 3));
+                    break;
                 }
             }
         }

@@ -64,12 +64,14 @@ final class Climber {
         keys(mc, false, false);
         CactusBuilderClient.stopWalking(mc);
         s = S.IDLE;
+        Dbg.log("CLIMB -> IDLE");
         pillar.clear();
         CactusBuilderClient.stalled = false;
         CactusBuilderClient.stop(mc, "Podbudowa: " + why);
     }
 
     private static void abort(MinecraftClient mc, String why) {
+        Dbg.log("CLIMB ABORT: " + why);
         cancel(mc, why);
         lastClimbFeet = Integer.MIN_VALUE; // pozwol sprobowac ponownie po wcisnieciu G
         cool = 60;
@@ -130,6 +132,30 @@ final class Climber {
         return findStep(w, c.getX(), c.getZ(), c.getY() + n) != null;
     }
 
+    /** Zapisuje do logu, dlaczego pole nie nadaje sie na slupek. */
+    private static void diagnose(ClientWorld w, BlockPos c, int n) {
+        StringBuilder sb = new StringBuilder("DIAG slupek na " + c.toShortString() + " n=" + n + ": ");
+        sb.append("wChunku=").append(CactusBuilderClient.plan.contains(c.getX() + 0.5, c.getZ() + 0.5, 0.0));
+        for (int i = 1; i <= n + 2; i++) {
+            if (!air(w, c.getX(), c.getY() + i, c.getZ())) {
+                sb.append(" NIE_powietrze_nad(y+").append(i).append(")=").append(w.getBlockState(c.up(i)).getBlock());
+                break;
+            }
+        }
+        int feet = c.getY() + n;
+        for (int[] d : CactusBuilderClient.DIRS) {
+            int nx = c.getX() + d[0];
+            int nz = c.getZ() + d[1];
+            sb.append(" [").append(d[0]).append(",").append(d[1]).append(": ")
+                    .append(solid(w, nx, feet - 1, nz) ? "podloga" : "BRAK_podlogi")
+                    .append(air(w, nx, feet, nz) ? "" : " zajete_stopy")
+                    .append(air(w, nx, feet + 1, nz) ? "" : " zajeta_glowa")
+                    .append(CactusBuilderClient.plan.contains(nx + 0.5, nz + 0.5, 0.0) ? "" : " poza_chunkiem")
+                    .append("]");
+        }
+        Dbg.log(sb.toString());
+    }
+
     /** @return true gdy Climber zajal ten tick (wtedy reszta moda nic nie robi). */
     static boolean tick(MinecraftClient mc) {
         try {
@@ -169,6 +195,7 @@ final class Climber {
                 BlockPos start = p.getBlockPos();
                 List<BlockPos> r = CactusBuilderClient.findPath(w, start, g -> qualifies(w, g, nn), false);
                 if (r == null || r.isEmpty()) {
+                    diagnose(w, start, nn);
                     abort(mc, "brak miejsca na slupek w chunku");
                     return true;
                 }
@@ -185,6 +212,7 @@ final class Climber {
                 startN = n2;
                 pillar.clear();
                 s = S.GOTO;
+                Dbg.log("CLIMB -> GOTO");
                 timer = 0;
                 return true;
             }
@@ -204,6 +232,7 @@ final class Climber {
                         cz = gz;
                         baseFeet = gy;
                         s = S.JUMP;
+                        Dbg.log("CLIMB -> JUMP");
                         timer = 0;
                     } else if (!moving) {
                         // dotarl do ostatniego punktu - dokrec srodek pola
@@ -218,6 +247,7 @@ final class Climber {
                     aimAt(p, cx + 0.5, baseFeet, cz + 0.5);
                     keys(mc, true, false);
                     s = S.AIR;
+                    Dbg.log("CLIMB -> AIR");
                     timer = 0;
                     return true;
                 }
@@ -232,6 +262,7 @@ final class Climber {
                         if (res == CactusBuilderClient.Res.DONE) {
                             pillar.add(pos);
                             s = S.LAND;
+                            Dbg.log("CLIMB -> LAND");
                             timer = 0;
                         } else if (res != CactusBuilderClient.Res.WAIT) {
                             abort(mc, "nie moge postawic klocka pod soba (" + res + ")");
@@ -246,8 +277,10 @@ final class Climber {
                         timer = 0;
                         if (--need > 0) {
                             s = S.JUMP;
+                            Dbg.log("CLIMB -> JUMP");
                         } else {
                             s = S.STEP;
+                            Dbg.log("CLIMB -> STEP");
                             stepX = Integer.MIN_VALUE;
                         }
                     } else if (timer > 40) {
@@ -272,6 +305,7 @@ final class Climber {
                         CactusBuilderClient.stopWalking(mc);
                         trimPillar();
                         s = S.BREAK;
+                        Dbg.log("CLIMB -> BREAK");
                         timer = 0;
                     } else {
                         CactusBuilderClient.walkTo(mc, goal, false);
@@ -345,6 +379,7 @@ final class Climber {
         keys(mc, false, false);
         CactusBuilderClient.stopWalking(mc);
         s = S.IDLE;
+        Dbg.log("CLIMB -> IDLE");
         cool = 100;
         pillar.clear();
         CactusBuilderClient.keepOrientation = true;

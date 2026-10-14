@@ -29,6 +29,7 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -95,6 +96,7 @@ public class CactusBuilderClient implements ClientModInitializer {
     /** true gdy pole celu jest pod graczem i nie ma gdzie sie cofnac (ostatnia kratka w rogu) -> od razu podbudowa. */
     static boolean trapped;
     static int centerTicks;
+    static BlockPos lastLoggedTarget;
     /** cel, dla ktorego nie ma lepszego miejsca do stania niz obecne (nie planuj ruchu ponownie). */
     static BlockPos noBetter;
     /** true tylko przy wznowieniu po podbudowie: plan zachowuje orientacje (to samo naroze konca pietra). */
@@ -202,6 +204,14 @@ public class CactusBuilderClient implements ClientModInitializer {
         }
 
         BlockPos pos = target.pos();
+        if (!pos.equals(lastLoggedTarget)) {
+            lastLoggedTarget = pos;
+            Dbg.log("TARGET " + target.kind() + " " + pos.toShortString() + " bot=" + p.getBlockPos().toShortString());
+        }
+        if (ticks % 40 == 0) {
+            Dbg.log("TICK bot=" + p.getBlockPos().toShortString() + " status=" + status + " walking=" + walking
+                    + " pathFailed=" + pathFailed + " walkTicks=" + walkTicks);
+        }
         Vec3d center = Vec3d.ofCenter(pos);
         double dist = p.getEyePos().distanceTo(center);
         boolean intersects = p.getBoundingBox().intersects(new Box(pos));
@@ -281,6 +291,7 @@ public class CactusBuilderClient implements ClientModInitializer {
     }
 
     static void skip(BlockPos pos) {
+        Dbg.log("SKIP " + pos.toShortString() + (target != null ? " " + target.kind() : ""));
         skipped.add(pos);
         attempts.remove(pos);
         target = null;
@@ -321,11 +332,18 @@ public class CactusBuilderClient implements ClientModInitializer {
         lastHp = p.getHealth();
         lastHealTick = ticks;
         runPlayer = p;
+        Dbg.log("START chunk=" + chunk.x + "," + chunk.z + " baseY=" + baseY + " feet=" + p.getBlockPos().toShortString()
+                + " flipZ=" + plan.flipZ + " lowFirst=" + plan.lowFirst);
         state = State.RUNNING;
         status = "Buduje";
     }
 
     static void stop(MinecraftClient mc, String why) {
+        if (mc.player != null && mc.world != null) {
+            Dbg.log("STOP '" + why + "' pos=" + mc.player.getBlockPos().toShortString()
+                    + " rem[kaktus,piasek,doniczka]=" + (plan != null ? Arrays.toString(plan.remaining(mc.world)) : "-")
+                    + " skipped=" + skipped.size() + " trapped=" + trapped + " stalled=" + stalled);
+        }
         state = State.IDLE;
         status = why;
         target = null;
@@ -571,23 +589,21 @@ public class CactusBuilderClient implements ClientModInitializer {
         double dx = goal.x - p.getX();
         double dz = goal.z - p.getZ();
         double len = Math.sqrt(dx * dx + dz * dz);
-        // Ruch wzgledem kamery (W/S/A/D), BEZ obracania sie: bot idzie tez tylem i bokiem, jak gracz.
-        double yawRad = Math.toRadians(p.getYaw());
-        double fx = -Math.sin(yawRad);
-        double fz = Math.cos(yawRad);
-        double rx = -Math.cos(yawRad);
-        double rz = -Math.sin(yawRad);
-        double fwd = len > 0.01 ? (dx * fx + dz * fz) / len : 0.0;
-        double side = len > 0.01 ? (dx * rx + dz * rz) / len : 0.0;
-        boolean move = len > 0.15;
+        // Obracamy kamere w kierunku celu, idziemy tylko do przodu (jak gracz): obroc sie -> idz -> obroc sie.
+        float desired = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float diff = MathHelper.wrapDegrees(desired - p.getYaw());
+        if (len > 0.01) {
+            p.setYaw(p.getYaw() + Math.max(-45.0f, Math.min(45.0f, diff)));
+        }
+        boolean aligned = Math.abs(diff) < 35.0f;
         mc.options.sneakKey.setPressed(false);
-        mc.options.forwardKey.setPressed(move && fwd > 0.38);
-        mc.options.backKey.setPressed(move && fwd < -0.38);
-        mc.options.rightKey.setPressed(move && side > 0.38);
-        mc.options.leftKey.setPressed(move && side < -0.38);
+        mc.options.forwardKey.setPressed(len > 0.15 && aligned);
+        mc.options.backKey.setPressed(false);
+        mc.options.leftKey.setPressed(false);
+        mc.options.rightKey.setPressed(false);
         walking = true;
         boolean jump = false;
-        if (len > 0.01 && p.isOnGround()) {
+        if (len > 0.01 && aligned && p.isOnGround()) {
             double nx = dx / len;
             double nz = dz / len;
             BlockPos ahead = BlockPos.ofFloored(p.getX() + nx * 0.7, p.getY(), p.getZ() + nz * 0.7);
