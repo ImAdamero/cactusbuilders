@@ -141,30 +141,15 @@ final class ChunkPlan {
     }
 
     private void build() {
-        int edgeX = lowFirst ? minX : minX + 15;
-        int dirX = lowFirst ? 1 : -1;
-        int edgeZ = flipZ ? minZ : minZ + 15;
-        int nextZ = edgeZ + (flipZ ? 1 : -1);
         for (int layer = 0; layer < maxLayers; layer++) {
             int h = 2 * layer + 1;
-            // 14 rzedow "weza"
-            for (int row = 0; row < 14; row++) {
+            // 16 rzedow "weza", jeden po drugim; ostatni rzad konczy sie w rogu (tam bot sie podsadza)
+            for (int row = 0; row < 16; row++) {
                 for (int c = 0; c < 16; c++) {
                     boolean forward = ((row & 1) == 0) == lowFirst;
                     int x = minX + (forward ? c : 15 - c);
                     int z = minZ + (flipZ ? 15 - row : row);
                     cell(layer, h, x, z);
-                }
-            }
-            // dwa ostatnie rzedy (od strony gracza)
-            for (int c = 15; c >= 0; c--) {
-                int x = edgeX + dirX * c;
-                if (expected(x, nextZ, h) == Kind.CACTUS) {
-                    cell(layer, h, x, nextZ);
-                    cell(layer, h, x, edgeZ);
-                } else {
-                    cell(layer, h, x, edgeZ);
-                    cell(layer, h, x, nextZ);
                 }
             }
         }

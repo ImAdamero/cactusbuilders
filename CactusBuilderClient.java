@@ -280,7 +280,8 @@ public class CactusBuilderClient implements ClientModInitializer {
             sessionBaseY = baseY;
             Climber.resetSession();
         }
-        if (keepOrientation && plan != null && plan.chunk.equals(chunk)) {
+        // wznowienie w tym samym chunku (G po braku materialow / pauzie, albo po podbudowie): ta sama kolejnosc budowy
+        if (plan != null && plan.chunk.equals(chunk)) {
             plan = new ChunkPlan(chunk, baseY, MAX_LAYERS, plan.flipZ, plan.lowFirst);
         } else {
             plan = new ChunkPlan(chunk, baseY, MAX_LAYERS);
@@ -551,17 +552,23 @@ public class CactusBuilderClient implements ClientModInitializer {
         double dx = goal.x - p.getX();
         double dz = goal.z - p.getZ();
         double len = Math.sqrt(dx * dx + dz * dz);
-        float desired = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        float diff = MathHelper.wrapDegrees(desired - p.getYaw());
-        if (len > 0.01) {
-            p.setYaw(p.getYaw() + Math.max(-25.0f, Math.min(25.0f, diff)));
-        }
-        boolean aligned = Math.abs(diff) < 50.0f;
+        // Ruch wzgledem kamery (W/S/A/D), BEZ obracania sie: bot idzie tez tylem i bokiem, jak gracz.
+        double yawRad = Math.toRadians(p.getYaw());
+        double fx = -Math.sin(yawRad);
+        double fz = Math.cos(yawRad);
+        double rx = -Math.cos(yawRad);
+        double rz = -Math.sin(yawRad);
+        double fwd = len > 0.01 ? (dx * fx + dz * fz) / len : 0.0;
+        double side = len > 0.01 ? (dx * rx + dz * rz) / len : 0.0;
+        boolean move = len > 0.15;
         mc.options.sneakKey.setPressed(false);
-        mc.options.forwardKey.setPressed(len > 0.15 && aligned);
+        mc.options.forwardKey.setPressed(move && fwd > 0.38);
+        mc.options.backKey.setPressed(move && fwd < -0.38);
+        mc.options.rightKey.setPressed(move && side > 0.38);
+        mc.options.leftKey.setPressed(move && side < -0.38);
         walking = true;
         boolean jump = false;
-        if (len > 0.01 && aligned && p.isOnGround()) {
+        if (len > 0.01 && p.isOnGround()) {
             double nx = dx / len;
             double nz = dz / len;
             BlockPos ahead = BlockPos.ofFloored(p.getX() + nx * 0.7, p.getY(), p.getZ() + nz * 0.7);
@@ -575,6 +582,9 @@ public class CactusBuilderClient implements ClientModInitializer {
     static void stopWalking(MinecraftClient mc) {
         walking = false;
         mc.options.forwardKey.setPressed(false);
+        mc.options.backKey.setPressed(false);
+        mc.options.leftKey.setPressed(false);
+        mc.options.rightKey.setPressed(false);
         mc.options.jumpKey.setPressed(false);
         mc.options.sneakKey.setPressed(false);
     }
