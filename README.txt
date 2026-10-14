@@ -1,9 +1,9 @@
-Cactus Builder 1.6.1 (Fabric, Minecraft 1.21.11, mapowania Yarn)
+Cactus Builder 1.6.2 (Fabric, Minecraft 1.21.11, mapowania Yarn)
 
 Budowa (potrzebna Java 21 + internet):
   Linux/Mac:  ./gradlew build
   Windows:    gradlew.bat build
-  Wynik: build/libs/cactusbuilder-1.6.1.jar  (NIE ten z -sources)
+  Wynik: build/libs/cactusbuilder-1.6.2.jar  (NIE ten z -sources)
   Wrzuc jar do .minecraft/mods razem z Fabric API (1.21.11).
 
 Jesli Gradle zglosi blad wersji (loom / fabric api / loader), wygeneruj szablon na

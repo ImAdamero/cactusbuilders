@@ -94,6 +94,7 @@ public class CactusBuilderClient implements ClientModInitializer {
     static boolean stalled;
     /** true gdy pole celu jest pod graczem i nie ma gdzie sie cofnac (ostatnia kratka w rogu) -> od razu podbudowa. */
     static boolean trapped;
+    static int centerTicks;
     /** cel, dla ktorego nie ma lepszego miejsca do stania niz obecne (nie planuj ruchu ponownie). */
     static BlockPos noBetter;
     /** true tylko przy wznowieniu po podbudowie: plan zachowuje orientacje (to samo naroze konca pietra). */
@@ -181,6 +182,7 @@ public class CactusBuilderClient implements ClientModInitializer {
             avoid.add(fp.up());
             target = plan.next(w, avoid, feet);
             walkTicks = 0;
+            centerTicks = 0;
             pathFor = null;
             if (target == null) {
                 // Jesli zostalo tylko pole pod nami - to jest ostatnia kratka: podbudowa w tym rogu.
@@ -206,6 +208,21 @@ public class CactusBuilderClient implements ClientModInitializer {
         boolean inReach = !intersects && dist <= REACH;
         boolean safeHere = !unsafe(w, p.getBlockPos());
 
+        // Hitbox gracza wchodzi w pole celu, choc stoimy na SWOIM polu (np. 0.3 od srodka):
+        // serwer nie pozwoli tam postawic bloku, a sciezka [start] nigdzie nie prowadzi -> bot stal w miejscu.
+        // Wycentruj sie na swoim polu.
+        BlockPos fpos = p.getBlockPos();
+        if (intersects && !pos.equals(fpos) && !pos.equals(fpos.up()) && centerTicks < 40) {
+            Vec3d mid = Vec3d.ofBottomCenter(fpos);
+            double ox = mid.x - p.getX();
+            double oz = mid.z - p.getZ();
+            if (Math.sqrt(ox * ox + oz * oz) > 0.16) {
+                centerTicks++;
+                status = "Centruje sie";
+                walkTo(mc, mid, false);
+                return;
+            }
+        }
         // Stoimy "z przodu" (za blisko jeszcze niezabudowanych sasiadow)? Przesun sie do tylu, zanim sie zamurujesz.
         boolean wantMove = false;
         if (inReach && safeHere && !pos.equals(noBetter)) {
@@ -235,6 +252,8 @@ public class CactusBuilderClient implements ClientModInitializer {
             if (!inReach) {
                 pathFor = null;
                 stopWalking(mc);
+                // nie stoj w miejscu w nieskonczonosc - pomin cel szybciej niz antyzastoj
+                if (++walkTicks > 60) skip(pos);
                 return;
             }
         }
